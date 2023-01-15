@@ -1,0 +1,42 @@
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Hack DAY</title>
+    <style type="text/css">
+        body {
+            display: flex;
+            background-color: rgb(218, 11, 200);
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.1/dist/phaser-arcade-physics.min.js"></script>
+    <script src="player.js"></script>
+    <script src="scene.js"></script>
+    <script src="enemy.js"></script>
+</head>
+
+<body>
+    <script>
+        var config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    debug: false,
+                    gravity: {
+                        y: 0,
+                    }
+                }
+            },
+            scene: [scene]
+        };
+        var game = new Phaser.Game(config);
+    </script>
+</body>
+
+</html>
