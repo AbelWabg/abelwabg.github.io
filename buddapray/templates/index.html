@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>念佛機器</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+    <script> Pi.init({ version: "2.0", sandbox: true }) </script>
+    <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@700&family=Noto+Sans+SC:wght@700&family=Play:wght@700&family=Roboto:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Play', 'Roboto', Arial, sans-serif, 'Noto Sans TC', 'Noto Sans SC', 'Microsoft YaHei', '微軟正黑體', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        WebFont.load({
+            google: {
+                families: ['Noto Sans TC:700', 'Noto Sans SC:700', 'Play:700', 'Roboto:700']
+            },
+            active: function() {
+                setTimeout(() => {
+                    initGame();
+                }, 1000);
+            }
+        });
+
+        function initGame() {
+            class NianfoGame extends Phaser.Scene {
+                constructor() {
+                    super('nianfogame');
+                }
+
+                preload() {
+                    this.load.image('woodfish', 'static/images/fish.png');
+                    this.load.image('bible', 'static/images/bibble.png');
+                    this.load.image('rebirth', 'static/images/pray.png');
+                    this.load.image('rebirthEnd', 'static/images/prayend.png');
+                    this.load.image('restart', 'static/images/restart.png');
+                    this.load.image('woodBackground', 'static/images/bk1.jpg');
+                    this.load.image('bibleBackground', 'static/images/biblebook1.jpg');
+                    this.load.image('yesButton', 'static/images/yes.png');
+                    this.load.image('mainBackground', 'static/images/main_bg.jpg');
+                    this.load.image('login', 'static/images/login.png');
+                    this.load.image('donate', 'static/images/donate.png');
+                    this.load.audio('woodSound', 'static/audio/fishaudio.mp3');
+                    this.load.audio('bibleSound', 'static/audio/bible.mp3');
+                    this.load.atlas('flares', 'static/images/flares.png', 'static/js/flares.json');
+                }
+
+                create() {
+                    this.showStartScreen();
+                    this.woodSound = this.sound.add('woodSound');
+                    this.bibleSound = this.sound.add('bibleSound');
+                    this.isGameStarted = false;
+                    this.isRebirthActive = false;
+                    this.restartUsed = false;
+                    this.username = null;
+                    this.isLoggedIn = false;
+                    this.emitter = this.add.particles(240, 530, 'flares', {
+                        frame: ['red', 'yellow', 'green'],
+                        lifespan: 4000,
+                        speed: { min: 150, max: 250 },
+                        scale: { start: 0.8, end: 0 },
+                        gravityY: 150,
+                        blendMode: 'ADD',
+                        emitting: false
+                    });
+                    const savedCount = localStorage.getItem('nianfoCount');
+                    if (savedCount) {
+                        this.count = parseInt(savedCount, 10);
+                    } else {
+                        this.count = 0;
+                    }
+                    this.rebirthTextWoodfish = `弟子/信女願以誦唸\n聖號 {count} 次功德，莊嚴佛淨土\n，上報四重恩，下濟三途苦\n，若有見聞者。悉發菩提心\n，盡此一報身。同生極樂國\n`;
+                    this.rebirthTextBible = `願以誦讀聖經 {count} 次的功德，\n獻給上帝，願祂的國降臨，\n願祂的旨意行在地上，如同行在天上。\n`;
+                }
+
+                showStartScreen() {
+                    this.background = this.add.image(240, 360, 'mainBackground').setScale(1.2);
+                    this.background.setDepth(-1);
+                    this.choiceText = this.add.text(140, 220, '請選擇誦唸物品:\n 木魚 或 聖經', {
+                        fontSize: '24px',
+                        fontFamily: 'Play, Roboto, Arial, sans-serif, Noto Sans TC, Noto Sans SC, Microsoft YaHei, 微軟正黑體, sans-serif',
+                        fontWeight: '700',
+                        color: '#CF1BCFFF'
+                    });
+                    this.restartBtn = this.add.image(90, 680, 'restart').setScale(0.9).setInteractive();
+                    this.restartBtn.on('pointerdown', this.showRestartConfirmation, this);
+                    this.hideRestartButton();
+                    this.woodfishChoice = this.add.image(160, 360, 'woodfish').setInteractive().setScale(0.5);
+                    this.bibleChoice = this.add.image(320, 360, 'bible').setInteractive().setScale(0.5);
+                    this.woodfishChoice.on('pointerdown', () => this.startGame('woodfish'));
+                    this.bibleChoice.on('pointerdown', () => this.startGame('bible'));
+                    this.loginButton = this.add.image(360, 680, 'login').setInteractive().setScale(0.5);
+                    this.loginButton.on('pointerdown', this.handleLogin, this);
+                    this.donateButton = this.add.image(50, 360, 'donate').setInteractive().setScale(0.5);
+                    this.donateButton.on('pointerdown', () => {
+                        this.initiatePiPayment();
+                    });
+                    this.hideGameElements();
+                }
+
+                handleLogin() {
+                    const scopes = ['username', 'payments'];
+                    Pi.authenticate(scopes, this.onIncompletePaymentFound).then(auth => {
+                        this.accessToken = auth.accessToken;
+                        this.fetchUsername();
+                    }).catch(error => {
+                        console.error('Login failed:', error);
+                    });
+                }
+
+                fetchUsername() {
+                    fetch('/me', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accessToken: this.accessToken })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.username) {
+                            this.username = data.username;
+                            this.showUsername();
+                        } else {
+                            console.error('Failed to fetch username:', data);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching username:', error);
+                    });
+                }
+
+                showUsername() {
+                    if (this.usernameText) {
+                        this.usernameText.destroy();
+                    }
+                    this.usernameText = this.add.text(16, 16, `使用者: ${this.username}`, {
+                        fontSize: '24px',
+                        fontFamily: 'Play, Roboto, Arial, sans-serif, Noto Sans TC, Noto Sans SC, Microsoft YaHei, 微軟正黑體, sans-serif',
+                        fontWeight: '700',
+                        color: '#7A0785FF'
+                    });
+                }
+
+                initiatePiPayment() {
+                    const paymentData = {
+                        amount: 1, // 支付金額為 1 Pi
+                        memo: "Donation for the game", // 支付備註
+                        metadata: { donation: true } // 自定義元數據
+                    };
+
+                    const paymentCallbacks = {
+                        onReadyForServerApproval: (paymentDTO) => {
+                            const paymentId = paymentDTO.identifier;
+                            fetch('/payment/approve', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ paymentId: paymentId })
+                            }).then(response => response.json())
+                              .then(data => console.log("Server approval response:", data))
+                              .catch(error => console.error("Approval error:", error));
+                        },
+                        onReadyForServerCompletion: (paymentDTO, txid) => {
+                            const paymentId = paymentDTO.identifier;
+                            fetch('/payment/complete', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ paymentId: paymentId, txid: txid })
+                            }).then(response => response.json())
+                              .then(data => console.log("Server completion response:", data))
+                              .catch(error => console.error("Completion error:", error));
+                        },
+                        onCancel: (paymentDTO) => {
+                            console.log("Payment cancelled:", paymentDTO);
+                            alert("Payment cancelled.");
+                        },
+                        onError: (error, paymentDTO) => {
+                            console.error("Payment error:", error, paymentDTO);
+                            alert("Payment error.");
+                        }
+                    };
+
+                    Pi.createPayment(paymentData, paymentCallbacks);
+                }
+ 
+
+                startGame(choice) {
+                    this.woodfishChoice.visible = false;
+                    this.bibleChoice.visible = false;
+                    this.choiceText.visible = false;
+                    this.loginButton.visible = false;
+                    this.loginButton.disableInteractive();
+                    if (choice === 'woodfish') {
+                        this.background.setTexture('woodBackground').setScale(1);
+                    } else {
+                        this.background.setTexture('bibleBackground').setScale(1);
+                    }
+                    if (choice === 'woodfish') {
+                        this.nianfoObj = this.add.image(240, 600, 'woodfish').setScale(0.7).setInteractive();
+                    } else {
+                        this.nianfoObj = this.add.image(240, 600, 'bible').setScale(0.7).setInteractive();
+                    }
+                    this.nianfoObj.on('pointerdown', this.increaseCount, this);
+                    this.countText = this.add.text(16, 56, `次數: ${this.count}`, {
+                        fontSize: '24px',
+                        fontFamily: 'Play, Roboto, Arial, sans-serif, Noto Sans TC, Noto Sans SC, Microsoft YaHei, 微軟正黑體, sans-serif',
+                        fontWeight: '700',
+                        color: '#FFD700'
+                    });
+                    this.rebirth = this.add.image(390, 40, 'rebirth').setInteractive().setScale(1);
+                    this.rebirth.on('pointerdown', this.showRebirthCount, this);
+                    this.rebirthUsed = false;
+                    this.rebirth.visible = this.count > 0;
+                    this.isGameStarted = true;
+                    this.showRestartButton();
+                }
+
+                increaseCount() {
+                    if (this.isGameStarted && !this.isRebirthActive) {
+                        this.count++;
+                        this.countText.setText(`次數: ${this.count}`);
+                        localStorage.setItem('nianfoCount', this.count);
+                        if (this.nianfoObj.texture.key === 'woodfish') {
+                            this.woodSound.play();
+                        } else {
+                            this.bibleSound.play();
+                        }
+                        this.playParticleEffect();
+                        this.tweens.add({
+                            targets: this.nianfoObj,
+                            y: '-=20',
+                            duration: 100,
+                            onComplete: () => {
+                                this.nianfoObj.y += 20;
+                            }
+                        });
+                        if (this.count > 0 && !this.rebirth.visible) {
+                            this.rebirth.visible = true;
+                        }
+                    }
+                }
+
+                playParticleEffect() {
+                    this.emitter.explode(16);
+                }
+
+                showRebirthCount() {
+                    if (!this.rebirthUsed) {
+                        this.hideGameElements();
+                        this.hideRestartButton();
+                        this.rebirth.visible = false;
+                        let rebirthText;
+                        if (this.nianfoObj.texture.key === 'woodfish') {
+                            rebirthText = this.rebirthTextWoodfish.replace('{count}', this.count);
+                        } else {
+                            rebirthText = this.rebirthTextBible.replace('{count}', this.count);
+                        }
+                        const rebirthCount = this.add.text(55, 200, rebirthText, {
+                            fontSize: '30px',
+                            fontFamily: 'Play, Roboto, Arial, sans-serif, Noto Sans TC, Noto Sans SC, Microsoft YaHei, 微軟正黑體, sans-serif',
+                            fontWeight: '700',
+                            color: '#FFA500'
+                        });
+                        const rebirthEndImg = this.add.image(240, 480, 'rebirthEnd').setInteractive().setScale(1.5);
+                        rebirthEndImg.on('pointerdown', () => {
+                            this.count = 0;
+                            this.countText.setText(`次數: ${this.count}`);
+                            rebirthCount.destroy();
+                            rebirthEndImg.destroy();
+                            this.rebirthUsed = false;
+                            this.isRebirthActive = false;
+                            this.rebirth.visible = false;
+                            this.restartGame();
+                        });
+                        this.rebirthUsed = true;
+                        this.isRebirthActive = true;
+                    }
+                }
+
+                showRestartConfirmation() {
+                    if (!this.restartUsed) {
+                        this.hideGameElements();
+                        this.hideRestartButton();
+                        this.rebirth.visible = false;
+                        this.restartText = this.add.text(90, 200, '你忘了迴向了喔!!\n確定要結束誦唸嗎?', {
+                            fontFamily: 'Play, Roboto, Arial, sans-serif, Noto Sans TC, Noto Sans SC, Microsoft YaHei, 微軟正黑體, sans-serif',
+                            fontSize: '32px',
+                            fontWeight: '700',
+                            color: '#FF0000'
+                        });
+                        this.restartText.setStroke('#DE77AE', 16);
+                        this.yesButton = this.add.image(240, 400, 'yesButton').setInteractive().setScale(0.5);
+                        this.yesButton.on('pointerdown', () => {
+                            this.count = 0;
+                            localStorage.setItem('nianfoCount', 0);
+                            this.restartGame();
+                        });
+                        this.restartUsed = true;
+                    }
+                }
+
+                restartGame() {
+                    this.restartUsed = false;
+                    if (this.restartText) this.restartText.destroy();
+                    if (this.yesButton) this.yesButton.destroy();
+                    this.hideRestartButton();
+                    this.background.setTexture('mainBackground').setScale(1.8);
+                    this.showStartScreen();
+                    this.isGameStarted = false;
+                    this.rebirthUsed = false;
+                    this.isRebirthActive = false;
+                    this.rebirth.visible = false;
+                    this.hideGameElements();
+                }
+
+                hideGameElements() {
+                    if (this.countText) {
+                        this.countText.visible = false;
+                    }
+                    if (this.nianfoObj) {
+                        this.nianfoObj.visible = false;
+                    }
+                }
+
+                showGameElements() {
+                    if (this.countText) {
+                        this.countText.visible = true;
+                    }
+                    if (this.nianfoObj) {
+                        this.nianfoObj.visible = true;
+                    }
+                }
+
+                showRestartButton() {
+                    this.restartBtn.visible = true;
+                    this.restartBtn.setInteractive();
+                }
+
+                hideRestartButton() {
+                    this.restartBtn.visible = false;
+                    this.restartBtn.disableInteractive();
+                }
+            }
+
+            const config = {
+                type: Phaser.AUTO,
+                width: 480,
+                height: 720,
+                scene: [NianfoGame]
+            };
+
+            const game = new Phaser.Game(config);
+        }
+    </script>
+</body>
+</html>
